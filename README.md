@@ -4,13 +4,15 @@
 
 EasyKey 是面向指定 OPPO / 一加设备的 KernelSU 模块，可以为实体快捷键分别设置**单击、长按、双击**动作。后台使用 C 程序监听输入事件，前台通过 WebUI 管理命令和按键绑定，正常运行时保存配置即可生效。
 
+本仓库是 EasyKey 的分支版本：后台程序剥离了 musl 运行时，改为直连 Linux 系统调用，功能与手势行为保持一致。
+
 | 项目 | 信息 |
 | --- | --- |
 | 当前版本 | `v3`（`versionCode=300`） |
 | 作者 | MoeShadow |
 | 模块 ID | `Easy_Key` |
 | 后台进程 | `EasyKey` |
-| 构建架构 | ARM64 / AArch64，静态链接 |
+| 构建架构 | ARM64 / AArch64，静态链接，不含 libc 运行时 |
 | 安装目录 | `/data/adb/modules/Easy_Key/` |
 
 ## 导航
@@ -257,7 +259,9 @@ easykey/
 ├── src/
 │   ├── EasyKey.c
 │   ├── core.c
-│   └── core.h
+│   ├── core.h
+│   ├── nolibc.h
+│   └── start.c
 ├── tests/
 │   ├── core_test.c
 │   ├── webui_test.js
@@ -286,10 +290,12 @@ easykey/
 | --- | --- |
 | `src/EasyKey.c` | 命令执行、输入设备发现和配置监听 |
 | `src/core.c`、`src/core.h` | 手势识别与命令解析，供正式后端和独立测试共用 |
+| `src/nolibc.h` | aarch64 系统调用内联封装，后端不使用 libc 运行时 |
+| `src/start.c` | 进程入口、`vfork` 汇编和 `mem*` 实现，替代 musl 启动运行时 |
 | `tests/core_test.c` | 手势、命令解析和配置原子加载测试，不参与正式构建 |
 | `tests/webui_test.js` | 模拟 Root 接口，验证前端读取失败保护、操作互斥和配置校验 |
 | `tests/module_test.js` | 在临时目录测试升级迁移和重载脚本成功、失败路径 |
-| `scripts/build.ps1` | 使用 Zig 交叉编译 ARM64 后端 |
+| `scripts/build.ps1` | 使用 Zig 交叉编译 ARM64 后端，分编译与脱离 libc 链接两步 |
 | `scripts/test.ps1` | 后端自测、WebUI 静态检查、数据与安装包检查 |
 | `package.ps1` | 先构建后打包，版本号读取自 `module.prop` |
 | `module/` | 安装包的内容根目录 |
@@ -311,6 +317,8 @@ easykey/
 - `sh`、`flock`：运行宿主机 Shell 语法检查及升级、重载测试。Windows 可使用 MSYS2，并将其 `usr/bin` 加入 PATH；两者需来自同一套运行环境，以共享文件锁句柄。设备端统一使用 KernelSU 自带 BusyBox 的 `sh` 和 `flock`，避免系统 Shell 在执行外部命令时关闭锁句柄。
 
 构建脚本使用 `uv run --no-project --with ziglang python -m ziglang cc`，首次运行可能需要联网下载相关依赖。编译目标是 `aarch64-linux-musl`，生成静态链接的 ARM64 可执行文件。
+
+后端不链接 libc 运行时：只借用 musl 与 Linux 头文件里的常量和结构体，系统调用由 `src/nolibc.h` 内联展开，进程入口、`vfork` 与 `mem*` 由 `src/start.c` 提供。构建因此分成两步——先带头文件编译，再用 `-nostdlib` 链接。这是因为 `zig cc` 会忽略 `-nostartfiles`（crt1.o 仍被链接），而 `-nostdlib` 又会同时移除头文件搜索路径。
 
 获取源码：
 
