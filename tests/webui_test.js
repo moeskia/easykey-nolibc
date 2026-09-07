@@ -53,7 +53,7 @@ const library = JSON.stringify([{ id: 'one', type: 'direct', name: '命令', con
       const sections = [...command.matchAll(/printf '\\n:([a-z_]+)_ok:'; base64 < ([^;\s]+); printf ':[a-z_]+_end'; else printf '\\n:[a-z_]+_missing'; fi/g)];
       if (command.startsWith('pid=$(pidof') || sections.length) {
         let out = command.startsWith('pid=$(pidof')
-          ? 'ek_pid=123|ek_version=v3|ek_state=S|ek_input=/dev/input/event0'
+          ? 'ek_pid=123|ek_version=v3.1|ek_state=S|ek_input=/dev/input/event0'
           : '';
         for (const section of sections) {
           const tag = section[1];

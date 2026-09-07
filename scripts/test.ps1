@@ -23,7 +23,7 @@ try {
 
     $moduleProps = Get-Content -LiteralPath "module/module.prop"
     $version = ($moduleProps | Where-Object { $_ -like "version=*" } | Select-Object -First 1).Substring(8)
-    if ($version -ne "v3") { throw "模块版本错误" }
+    if ($version -ne "v3.1") { throw "模块版本错误" }
     if ($moduleProps -notcontains "author=MoeShadow") { throw "模块作者错误" }
 
     & (Join-Path $root "package.ps1")
