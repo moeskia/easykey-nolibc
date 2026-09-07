@@ -8,7 +8,7 @@ EasyKey 是面向指定 OPPO / 一加设备的 KernelSU 模块，可以为实体
 
 | 项目 | 信息 |
 | --- | --- |
-| 当前版本 | `v3`（`versionCode=300`） |
+| 当前版本 | `v3.1`（`versionCode=310`） |
 | 作者 | MoeShadow |
 | 模块 ID | `Easy_Key` |
 | 后台进程 | `EasyKey` |
@@ -67,7 +67,7 @@ EasyKey 是面向指定 OPPO / 一加设备的 KernelSU 模块，可以为实体
 
 ## 安装与首次使用
 
-1. 按[构建与测试](#构建与测试)生成 `dist/EasyKey-v3.zip`。GitHub 的 **Code → Download ZIP** 下载的是源码，不能直接作为模块安装包刷入。
+1. 按[构建与测试](#构建与测试)生成 `dist/EasyKey-v3.1.zip`。GitHub 的 **Code → Download ZIP** 下载的是源码，不能直接作为模块安装包刷入。
 2. 将安装包复制到手机，通过 KernelSU 管理器的模块安装入口选择 ZIP。
 3. 安装脚本会校验型号并显示说明：按**音量加**确认继续，按**音量减**退出。
 4. 安装完成后重启手机，等待系统启动完成。
@@ -283,7 +283,7 @@ easykey/
 │   └── webroot/
 │       └── index.html
 └── dist/
-    └── EasyKey-v3.zip
+    └── EasyKey-v3.1.zip
 ```
 
 | 路径 | 职责 |
@@ -347,7 +347,7 @@ Set-Location easykey
 .\package.ps1
 ```
 
-`package.ps1` 会自动调用构建脚本，不需要预先单独编译。当前版本的输出为 `dist/EasyKey-v3.zip`，ZIP 根目录直接包含 `module.prop` 等模块文件，不包含外层 `module/` 目录。
+`package.ps1` 会自动调用构建脚本，不需要预先单独编译。当前版本的输出为 `dist/EasyKey-v3.1.zip`，ZIP 根目录直接包含 `module.prop` 等模块文件，不包含外层 `module/` 目录。
 
 ### 自动化检查范围
 
@@ -356,7 +356,7 @@ Set-Location easykey
 1. 编译并运行手势、命令解析与配置加载测试，覆盖空配置、缺键、非法内容、超长拒绝和失败不覆盖。
 2. WebUI 语法、重复 `id` 及行为回归：不同 Root 返回格式、读取失败后保存、连续点击、写入失败、清空绑定和手动重载。
 3. 两份命令库能否解析为 JSON，以及仓库中的用户初始命令库与默认命令库是否一致。
-4. 模块版本为 `v3`、作者为 `MoeShadow`。
+4. 模块版本为 `v3.1`、作者为 `MoeShadow`。
 5. 宿主机 Shell 语法检查，以及首次安装、连续升级、脚本备份、复制失败和重载成功、失败测试。
 6. 通过打包脚本完成 ARM64 编译，并验证 ZIP 中预期的 10 个文件条目。
 
