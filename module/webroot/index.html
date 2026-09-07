@@ -369,22 +369,31 @@
     const MAX_COMMAND_BYTES = 511;
     const MAX_CONFIG_BYTES = (MAX_COMMAND_BYTES + 1) * 3 + 24;
     const SNAPSHOT_COMMAND = `
-pid=$(pidof EasyKey 2>/dev/null | awk '{print $1}')
-version=$(sed -n 's/^version=//p' ${MODULE_DIR}module.prop 2>/dev/null | head -n 1)
-state=""; rss=""; threads=""; pss=""; start=""; cpu_ticks=""; system_uptime=""; clock_ticks=""; input=""
-if [ -n "$pid" ] && [ -r "/proc/$pid/status" ]; then
-  state=$(sed -n 's/^State:[[:space:]]*//p' /proc/$pid/status)
-  rss=$(awk '/^VmRSS:/{print $2 " " $3}' /proc/$pid/status)
-  threads=$(awk '/^Threads:/{print $2}' /proc/$pid/status)
-  pss=$(awk '/^Pss:/{print $2 " " $3}' /proc/$pid/smaps_rollup 2>/dev/null)
-  start=$(awk '{print $22}' /proc/$pid/stat)
-  cpu_ticks=$(awk '{print $14 + $15}' /proc/$pid/stat)
-  system_uptime=$(awk '{print int($1)}' /proc/uptime)
-  clock_ticks=$(getconf CLK_TCK 2>/dev/null)
-  [ -n "$clock_ticks" ] || clock_ticks=100
-  input=$(readlink /proc/$pid/fd/* 2>/dev/null | grep -m 1 '^/dev/input/')
-fi
-echo "ek_pid=$pid|ek_version=$version|ek_state=$state|ek_rss=$rss|ek_threads=$threads|ek_pss=$pss|ek_start=$start|ek_cpu_ticks=$cpu_ticks|ek_system_uptime=$system_uptime|ek_clock_ticks=$clock_ticks|ek_input=$input"`.trim();
+ pid=$(pidof EasyKey 2>/dev/null)
+ pid=\${pid%% *}
+ clock_ticks=\$(getconf CLK_TCK 2>/dev/null)
+ [ -n "\$clock_ticks" ] || clock_ticks=100
+ awk -v pid="$pid" -v mod="${MODULE_DIR}" -v ctk="\$clock_ticks" 'BEGIN{
+  state="";rss="";threads="";pss="";start="";cpu="";up="";ver="";input="";
+  f=mod "module.prop";
+  while((getline l < f)>0){if(l ~ /^version=/){sub(/^version=/,"",l);ver=l;break}} close(f);
+  if(pid!=""){
+    c="readlink /proc/" pid "/fd/* 2>/dev/null";
+    while((c | getline l)>0){if(l ~ /^\\/dev\\/input\\//){input=l;break}} close(c);
+    f="/proc/" pid "/status";
+    while((getline l < f)>0){
+      if(l ~ /^State:/){sub(/^State:[[:space:]]*/,"",l);state=l}
+      else if(l ~ /^VmRSS:/){sub(/^VmRSS:[[:space:]]*/,"",l);rss=l}
+      else if(l ~ /^Threads:/){sub(/^Threads:[[:space:]]*/,"",l);threads=l}
+    } close(f);
+    f="/proc/" pid "/smaps_rollup";
+    while((getline l < f)>0){if(l ~ /^Pss:/){sub(/^Pss:[[:space:]]*/,"",l);pss=l;break}} close(f);
+    f="/proc/" pid "/stat";
+    if((getline l < f)>0){p=index(l,") ");if(p>0){split(substr(l,p+2),a,/[[:space:]]+/);start=a[20];cpu=a[12]+a[13]}} close(f);
+    f="/proc/uptime";if((getline l < f)>0){split(l,u,/[[:space:]]+/);up=int(u[1])} close(f);
+  }
+  printf "ek_pid=%s|ek_version=%s|ek_state=%s|ek_rss=%s|ek_threads=%s|ek_pss=%s|ek_start=%s|ek_cpu_ticks=%s|ek_system_uptime=%s|ek_clock_ticks=%s|ek_input=%s",pid,ver,state,rss,threads,pss,start,cpu,up,ctk,input
+}'`.trim();
 
     let shellQueue = Promise.resolve();
     function pickField(obj, keys) {
@@ -394,8 +403,7 @@ echo "ek_pid=$pid|ek_version=$version|ek_state=$state|ek_rss=$rss|ek_threads=$th
       }
       return undefined;
     }
-    function execShell(cmd) {
-      const task = shellQueue.then(async () => {
+    async function doExec(cmd) {
         let res;
         if (typeof window.ksu === 'undefined' || !window.ksu.exec) {
           res = { errno: -1, stdout: "", stderr: "Root WebUI 接口不可用" };
@@ -422,20 +430,25 @@ echo "ek_pid=$pid|ek_version=$version|ek_state=$state|ek_rss=$rss|ek_threads=$th
           }
         }
         return res;
-      });
+    }
+    function execShell(cmd, parallel) {
+      if (parallel) return doExec(cmd);
+      const task = shellQueue.then(() => doExec(cmd));
       shellQueue = task.catch(() => {});
       return task;
     }
 
     function decodeText(value) {
-      const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0));
+      const bytes = Uint8Array.from(atob(value.replace(/\s+/g, '')), c => c.charCodeAt(0));
       return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
     }
 
     function encodeText(value) {
       const bytes = new TextEncoder().encode(value);
       let binary = "";
-      for (const byte of bytes) binary += String.fromCharCode(byte);
+      const CHUNK = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK)
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
       return btoa(binary);
     }
 
@@ -445,32 +458,18 @@ echo "ek_pid=$pid|ek_version=$version|ek_state=$state|ek_rss=$rss|ek_threads=$th
     }
 
     async function readFromFileSafe(filePath) {
-      const result = await execShell(`[ -f ${filePath} ] || { printf 'ek_file_missing'; exit 44; }; b64=$(base64 ${filePath}) || exit 1; printf 'ek_file_ok:%s:ek_file_end' "$b64" | tr -d '\n'`);
-      const output = result.stdout.trim();
-      if (result.errno === 44 || output === 'ek_file_missing') return { ok: false, exists: false, text: "", error: "文件不存在" };
-      if (result.errno !== 0 || !output.startsWith('ek_file_ok:') || !output.endsWith(':ek_file_end'))
-        return { ok: false, exists: true, text: "", error: result.stderr || "读取失败或返回内容不完整" };
-      try {
-        return { ok: true, exists: true, text: decodeText(output.slice(11, -12)), error: "" };
-      } catch (e) {
-        return { ok: false, exists: true, text: "", error: "文件不是有效的 UTF-8 文本" };
-      }
-    }
-
-    async function readFileChunked(filePath, chunkLen) {
-      const ex = await execShell(`[ -f ${filePath} ] || { printf 'ek_file_missing'; exit 44; }; printf 'ek_file_exists'`);
-      if (ex.errno === 44 || ex.stdout.trim() === 'ek_file_missing') return { ok: false, exists: false, text: "", error: "文件不存在" };
-      if (ex.errno !== 0 || ex.stdout.trim() !== 'ek_file_exists')
-        return { ok: false, exists: true, text: "", error: ex.stderr || "文件检查未确认" };
       const parts = [];
-      const step = chunkLen || 1000;
+      const step = 1000;
       let offset = 0;
       for (;;) {
         const start = offset + 1;
         const end = offset + step;
-        const cmd = `b64=$(base64 < ${filePath} | tr -d '\n'); printf '%s' "$b64" | cut -c${start}-${end}`;
+        const cmd = `[ -f ${filePath} ] || { printf 'ek_missing'; exit 44; }; b64=$(base64 < ${filePath} | tr -d '\n'); printf '%s' "$b64" | cut -c${start}-${end}`;
         const r = await execShell(cmd);
-        if (r.errno !== 0) return { ok: false, exists: true, text: "", error: r.stderr };
+        if (r.errno === 44)
+          return { ok: false, exists: false, text: "", error: "文件不存在" };
+        if (r.errno !== 0)
+          return { ok: false, exists: true, text: "", error: r.stderr || "读取失败或返回内容不完整" };
         const s = String(r.stdout || "").replace(/\s/g, "");
         if (!s) break;
         parts.push(s);
@@ -630,8 +629,7 @@ echo "ek_pid=$pid|ek_version=$version|ek_state=$state|ek_rss=$rss|ek_threads=$th
       }
     }
 
-    async function applySnapshot(values) {
-      applyStatus(values);
+    async function loadConfigAndRepo() {
       iniReady = false;
       repoReady = false;
       const ini = await readFromFileSafe(INI_FILE);
@@ -643,7 +641,7 @@ echo "ek_pid=$pid|ek_version=$version|ek_state=$state|ek_rss=$rss|ek_threads=$th
           notifyUser(`config.ini 解析失败：${e.message}。已保留页面数据，请修复后刷新`);
         }
       } else notifyUser(`config.ini 读取失败：${ini.error}。请恢复文件后刷新`);
-      const repo = await readFileChunked(REPO_FILE, 1000);
+      const repo = await readFromFileSafe(REPO_FILE);
       if (repo.ok) {
         try {
           repoData = parseRepoText(repo.text);
@@ -660,24 +658,25 @@ echo "ek_pid=$pid|ek_version=$version|ek_state=$state|ek_rss=$rss|ek_threads=$th
       updateHomeCards();
     }
 
-    async function performRefresh() {
-      iniReady = false;
-      repoReady = false;
+    async function performRefresh(opts) {
+      const withData = !opts || opts.data !== false;
       try {
-        const result = await execShell(SNAPSHOT_COMMAND);
-        if (result.errno === 0) await applySnapshot(parseSnapshot(result.stdout));
+        const result = await execShell(SNAPSHOT_COMMAND, true);
+        const output = String(result.stdout || '');
+        if (output.includes('ek_pid=')) applyStatus(parseSnapshot(output));
         else applyStatus({}, true);
+        if (withData) await loadConfigAndRepo();
       } catch (e) {
         applyStatus({}, true);
         notifyUser("刷新失败，请重试");
       }
     }
 
-    function refreshAll() {
+    function refreshAll(opts) {
       if (refreshPromise) return refreshPromise;
       if (busy) return Promise.resolve();
       setBusy(true);
-      refreshPromise = performRefresh().finally(() => {
+      refreshPromise = performRefresh(opts).finally(() => {
         refreshPromise = null;
         setBusy(false);
       });
@@ -1033,12 +1032,14 @@ echo "ek_pid=$pid|ek_version=$version|ek_state=$state|ek_rss=$rss|ek_threads=$th
 
     const navItems = document.querySelectorAll('.nav-item');
     const pages = document.querySelectorAll('.page');
+    let currentPage = 'page-home';
     navItems.forEach(item => {
       item.addEventListener('click', () => {
         navItems.forEach(n => n.classList.remove('active')); item.classList.add('active');
         const targetId = item.getAttribute('data-target');
         pages.forEach(p => p.classList.remove('active')); document.getElementById(targetId).classList.add('active');
-        if (targetId === 'page-home') refreshAll();
+        currentPage = targetId;
+        if (targetId === 'page-home') refreshAll({ data: false });
 
         const fab = document.getElementById('fab-add');
         if (targetId === 'page-config') fab.classList.add('show'); else fab.classList.remove('show');
@@ -1046,9 +1047,9 @@ echo "ek_pid=$pid|ek_version=$version|ek_state=$state|ek_rss=$rss|ek_threads=$th
     });
 
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) refreshAll();
+      if (!document.hidden && currentPage === 'page-home') refreshAll({ data: false });
     });
-    window.onload = refreshAll;
+    refreshAll();
   </script>
 </body>
 </html>
